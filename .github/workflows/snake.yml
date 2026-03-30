@@ -5,6 +5,9 @@ on:
     - cron: "0 */6 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,18 +16,21 @@ jobs:
       - name: checkout
         uses: actions/checkout@v3
 
-      # 1️⃣ 生成原始 snake（只读文件）
+      - name: setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
       - name: generate snake
         uses: Platane/snk@v3
         with:
           github_user_name: pusidun
-          outputs: dist/raw-snake.svg
+          outputs: |
+            dist/raw-snake.svg
 
-      # 2️⃣ 🔥 生成火焰版本（写入新目录）
       - name: apply fire effect
         run: node scripts/fireify.js
 
-      # 3️⃣ 发布到 output 分支（用我们自己的目录）
       - name: push to output branch
         uses: crazy-max/ghaction-github-pages@v3
         with:
