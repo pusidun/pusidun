@@ -1,39 +1,77 @@
 const fs = require("fs");
 
-// === 1️⃣ 读取原始 snake（只读） ===
 const inputPath = "dist/raw-snake.svg";
 const outputDir = "dist-final";
 const outputPath = `${outputDir}/snake-fire.svg`;
 
 if (!fs.existsSync(inputPath)) {
-  console.error("❌ raw snake not found");
+  console.error("raw snake not found");
   process.exit(1);
 }
 
-const originalSvg = fs.readFileSync(inputPath, "utf-8");
-let svg = originalSvg;
+let svg = fs.readFileSync(inputPath, "utf-8");
 
-// === 2️⃣ 火焰定义（核心）===
+const durationMatch = svg.match(/animation:[^;]*?([\d]+)ms/);
+const totalMs = durationMatch ? parseInt(durationMatch[1]) : 18500;
+const burnPct = (3000 / totalMs) * 100;
+
+// === 1. Modify cell keyframes: instant eat -> 3s burn trail ===
+// Original: @keyframes cN{P%{fill:var(--cX)}T%,100%{fill:var(--ce)}}
+// New: adds fire color phases (yellow flash -> orange -> red -> ember -> empty)
+svg = svg.replace(
+  /@keyframes (c[\da-f]+)\{([\d.]+)%\{fill:(var\(--c\d+\))\}([\d.]+)%,100%\{fill:var\(--ce\)\}\}/g,
+  (_, name, startPct, origFill, transPct) => {
+    const trans = parseFloat(transPct);
+    const burn = Math.min(burnPct, 100 - trans - 0.5);
+    const p = (frac) => (trans + burn * frac).toFixed(2);
+
+    return `@keyframes ${name}{` +
+      `${startPct}%{fill:${origFill}}` +
+      `${transPct}%{fill:#ffff66}` +
+      `${p(0.15)}%{fill:#ffcc00}` +
+      `${p(0.3)}%{fill:#ff8800}` +
+      `${p(0.5)}%{fill:#ff4400}` +
+      `${p(0.7)}%{fill:#cc2200}` +
+      `${p(0.85)}%{fill:#661100}` +
+      `${p(1.0)}%{fill:var(--ce)}` +
+      `100%{fill:var(--ce)}}`;
+  }
+);
+
+// === 2. Inject enhanced fire SVG definitions ===
 const fireDefs = `
 <defs>
-  <!-- 火焰扰动 -->
-  <filter id="fire">
-    <feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="3" result="noise"/>
-    <feDisplacementMap in="SourceGraphic" in2="noise" scale="5"/>
-    <feGaussianBlur stdDeviation="2" result="blur"/>
+  <filter id="snakeFire" x="-100%" y="-100%" width="300%" height="300%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.015 0.04" numOctaves="3" result="noise">
+      <animate attributeName="baseFrequency" values="0.015 0.04;0.025 0.06;0.01 0.03;0.015 0.04" dur="2s" repeatCount="indefinite"/>
+    </feTurbulence>
+    <feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G" result="displaced"/>
+    <feGaussianBlur in="displaced" stdDeviation="4" result="outerGlow"/>
+    <feColorMatrix type="matrix" in="outerGlow" result="warmOuter"
+      values="1.2 0.3 0 0 0  0.3 0.15 0 0 0  0 0 0 0 0  0 0 0 0.6 0"/>
+    <feGaussianBlur in="displaced" stdDeviation="1.5" result="innerGlow"/>
+    <feColorMatrix type="matrix" in="innerGlow" result="warmInner"
+      values="1 0.5 0 0 0.2  0.5 0.3 0 0 0.05  0 0 0 0 0  0 0 0 0.8 0"/>
     <feMerge>
-      <feMergeNode in="blur"/>
-      <feMergeNode in="SourceGraphic"/>
+      <feMergeNode in="warmOuter"/>
+      <feMergeNode in="warmInner"/>
+      <feMergeNode in="displaced"/>
     </feMerge>
   </filter>
 
-  <!-- 火焰渐变 -->
-  <linearGradient id="fireGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-    <stop offset="0%" stop-color="#ffff99"/>
-    <stop offset="25%" stop-color="#ffcc00"/>
-    <stop offset="50%" stop-color="#ff8800"/>
-    <stop offset="75%" stop-color="#ff3300"/>
-    <stop offset="100%" stop-color="#cc0000"/>
+  <linearGradient id="fireGradient" x1="0%" y1="100%" x2="0%" y2="0%">
+    <stop offset="0%" stop-color="#ff2200">
+      <animate attributeName="stop-color" values="#ff2200;#ff4400;#ff2200" dur="1.5s" repeatCount="indefinite"/>
+    </stop>
+    <stop offset="35%" stop-color="#ff8800">
+      <animate attributeName="stop-color" values="#ff8800;#ffaa22;#ff8800" dur="2s" repeatCount="indefinite"/>
+    </stop>
+    <stop offset="65%" stop-color="#ffcc00">
+      <animate attributeName="stop-color" values="#ffcc00;#ffdd44;#ffcc00" dur="1.8s" repeatCount="indefinite"/>
+    </stop>
+    <stop offset="100%" stop-color="#ffffaa">
+      <animate attributeName="stop-color" values="#ffffaa;#ffffff;#ffffcc;#ffffaa" dur="1s" repeatCount="indefinite"/>
+    </stop>
   </linearGradient>
 </defs>
 `;
@@ -42,25 +80,25 @@ const fireStyle = `
 <style>
   .s {
     fill: url(#fireGradient) !important;
-    filter: url(#fire) !important;
+    filter: url(#snakeFire) !important;
+  }
+  .u {
+    fill: url(#fireGradient) !important;
   }
 </style>
 `;
 
-// === 3️⃣ 注入 defs 和样式 ===
+const beforeInject = svg;
 svg = svg.replace(/<svg\b([^>]*)>/, `<svg$1>${fireDefs}${fireStyle}`);
 
-if (svg === originalSvg) {
-  console.error("❌ invalid svg root tag");
+if (svg === beforeInject) {
+  console.error("invalid svg root tag");
   process.exit(1);
 }
 
-// === 4️⃣ 创建输出目录（关键）===
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir);
 }
 
-// === 5️⃣ 写入新文件 ===
 fs.writeFileSync(outputPath, svg);
-
-console.log("🔥 Fire snake generated successfully!");
+console.log("Fire snake generated successfully!");
